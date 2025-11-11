@@ -248,7 +248,7 @@ def lade_daten(json_dateipfad, anzahl_pfade=3):
             t_a[a_id] = strecke.duration 
             w_a[a_id] = bahnhof_map[strecke.origin_yard_id].rangier_dauer # w_a = Rangierzeit am START
             chi_a[a_id] = 1000 # Placeholder
-            u_a[a_id] = 100 # Placeholder
+            u_a[a_id] = 25 # Placeholder
 
         # Stations-Parameter (i)
         for bahnhof in bahnhof_liste:
@@ -293,7 +293,7 @@ def lade_daten(json_dateipfad, anzahl_pfade=3):
             t_a = t_a,     # Dict: a -> fahrzeit
             w_a = w_a,     # Dict: a -> rangierzeit (am START)
             chi_a = chi_a, # Dict: a -> platzhalter-kosten (1000)
-            u_a = u_a,     # Dict: a -> platzhalter-kapazität (100)
+            u_a = u_a,     # Dict: a -> platzhalter-kapazität (25)
             
             # --- Parameter für Bahnhöfe (i) ---
             V_i = V_i,     # Dict: i -> kapazität
