@@ -7,10 +7,14 @@ Das Modell löst ein taktisches Planungsproblem im Schienengüterverkehr (SGV), 
 
 Ziel ist es, unter Einhaltung von Nachfrage, Kapazitätsgrenzen und maximalen Reisezeiten einen minimalen Gesamtkostenplan zu finden.
 
-Anforderungen_
+Anforderungen:
+
 Python 3.x
+
 gurobipy Python-Paket
 
 Wissenschaftlicher Kontext 
+
 Paper: Hasany, R. M., & Shafahi, Y. (2018). Modeling formulation and a new heuristic for the railroad blocking problem. Applied Mathematical Modelling, 56, 304-324.
+
 Datensätze: https://www.researchgate.net/publication/351746800_Data-SCRMTSP-Instances-2021
