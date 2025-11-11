@@ -8,10 +8,8 @@ Das Modell löst ein taktisches Planungsproblem im Schienengüterverkehr (SGV), 
 Ziel ist es, unter Einhaltung von Nachfrage, Kapazitätsgrenzen und maximalen Reisezeiten einen minimalen Gesamtkostenplan zu finden.
 
 Anforderungen:
-
-Python 3.x
-
-gurobipy Python-Paket
+- Python 3.x
+- gurobipy Python-Paket
 
 Wissenschaftlicher Kontext 
 
