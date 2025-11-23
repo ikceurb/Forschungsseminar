@@ -69,7 +69,7 @@ def _generiere_kandidaten_bloecke(bahnhof_ids, physischer_graph, max_hops=3):
     kandidaten_bloecke = []
     block_counter = 0
     
-    print(f"   -> Generiere logistische Blöcke (Max Hops: {max_hops})...")
+    print(f"   -> Generiere logische Blöcke (Max Hops: {max_hops})...")
 
     # Für jeden Bahnhof als möglichen Startpunkt eines Blocks
     for start_node in bahnhof_ids:
@@ -145,7 +145,7 @@ def _finde_top_k_blocking_pfade(start_node_id, end_node_id, k, block_graph, bahn
         for b in pfad_bloecke:
             besuchte_knoten.add(b.dest_yard_id)
 
-        # Wir suchen nun den nächsten logistischen Block, der hier startet
+        # Wir suchen nun den nächsten logischen Block, der hier startet
         if aktueller_knoten in block_graph:
             for block in block_graph[aktueller_knoten]:
                 naechster_knoten = block.dest_yard_id
@@ -169,7 +169,7 @@ def _finde_top_k_blocking_pfade(start_node_id, end_node_id, k, block_graph, bahn
 
 def lade_daten(json_dateipfad, anzahl_pfade=3, max_block_hops=3):
     """
-    Lädt JSON, generiert logistische Blöcke (bis max_block_hops) und berechnet Parameter.
+    Lädt JSON, generiert logische Blöcke (bis max_block_hops) und berechnet Parameter.
     
     :param max_block_hops: Maximale Anzahl physischer Segmente in einem Block (Standard: 3).
     """
@@ -276,9 +276,8 @@ def lade_daten(json_dateipfad, anzahl_pfade=3, max_block_hops=3):
             # w_a ist die Rangierzeit am START-Bahnhof dieses Blocks
             w_a[a_id] = bahnhof_map[blk.origin_yard_id].rangier_dauer
             
-            # Kosten: Hier vereinfacht. Im Paper oft "Operating Cost per train".
-            # Annahme: Je länger der Block, desto teurer der Zugbetrieb.
-            chi_a[a_id] = 1000  + (100 * blk.duration) 
+            # Kosten Zugebtrieben (chi_a): Pauschal 1000 $ pro Block
+            chi_a[a_id] = 1000  
             
             # Kapazität: Standardwert 50 Wagen (oder abgeleitet aus Gewicht)
             u_a[a_id] = 25 
@@ -288,7 +287,7 @@ def lade_daten(json_dateipfad, anzahl_pfade=3, max_block_hops=3):
                 xi_ia[(i_id, a_id)] = 1 if i_id == blk.origin_yard_id else 0
 
         A_ids = [b.block_id for b in block_objekte]
-        print(f"Block-Graph erstellt: {len(A_ids)} logistische Blöcke (Kanten).")
+        print(f"Graph erstellt: {len(A_ids)} logische Blöcke.")
 
         # --- 3. PFADSUCHE (Q) ---
         print(f"Suche Top-{anzahl_pfade} Blocking-Pfade pro Auftrag...")
