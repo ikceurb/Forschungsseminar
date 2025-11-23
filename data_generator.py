@@ -21,8 +21,8 @@ HUB_PARAMS = {
 
 SAT_PARAMS = {
     "rangier_dauer": 8,       
-    "kapazitaet_wagen": 500,  
-    "kapazitaet_zuege": 30,   
+    "kapazitaet_wagen": 2500,  
+    "kapazitaet_zuege": 70,   
     "kosten_pro_wagen": 25.0  
 }
 
