@@ -4,10 +4,9 @@ from collections import defaultdict
 import heapq
 from types import SimpleNamespace 
 
-# --- 1. KLASSENDEFINITIONEN ---
+# 1. KLASSENDEFINITIONEN
 
 class Auftrag:
-    """ Repräsentiert einen einzelnen Transportauftrag. """
     def __init__(self, order_id, anzahl_waggons, laenge, gewicht, origin, destination, latest_arrival_time):
         self.order_id = order_id
         self.anzahl_waggons = anzahl_waggons
@@ -17,113 +16,189 @@ class Auftrag:
         self.destination = destination
         self.latest_arrival_time = latest_arrival_time
     def __repr__(self):
-        return (f"Auftrag(ID: {self.order_id}, Von: {self.origin}, Nach: {self.destination}, "
-                f"Waggons: {self.anzahl_waggons})")
+        return (f"Auftrag({self.order_id}, {self.origin}->{self.destination}, {self.anzahl_waggons} Wag.)")
 
 class Rangierbahnhof:
-    """ Repräsentiert einen physischen Rangierbahnhof. """
-    def __init__(self, yard_id, rangier_dauer, kapazitaet, kosten_pro_wagen):
+    def __init__(self, yard_id, rangier_dauer, kapazitaet, kosten_pro_wagen,dispatch_kapazität):
         self.yard_id = yard_id
         self.rangier_dauer = rangier_dauer
         self.kapazitaet = kapazitaet
         self.kosten_pro_wagen = kosten_pro_wagen
+        self.dispatch_kapazität = dispatch_kapazität
     def __repr__(self):
-        return (f"Bahnhof(ID: {self.yard_id}, Dauer: {self.rangier_dauer}, "
-                f"Kapazität: {self.kapazitaet}, Kosten: {self.kosten_pro_wagen})")
+        return f"Bahnhof({self.yard_id}, Dauer:{self.rangier_dauer})"
 
-class BlockingPfad:
-    """ Repräsentiert eine physische Strecke (Template). """
-    def __init__(self, blocking_arc_id, origin_yard_id, dest_yard_id, 
-                 duration, max_length, max_weight):
-        self.origin_yard_id = origin_yard_id
-        self.dest_yard_id = dest_yard_id
+class PhysischeStrecke:
+    """ Repräsentiert ein physisches Gleis zwischen zwei direkten Nachbarn (aus DrivingArcs). """
+    def __init__(self, origin_id, dest_id, duration, max_length, max_weight):
+        self.origin_id = origin_id
+        self.dest_id = dest_id
         self.duration = duration
         self.max_length = max_length
         self.max_weight = max_weight
-        self.blocking_arc_id = blocking_arc_id 
     def __repr__(self):
-        return (f"Strecke(ID: {self.blocking_arc_id}, "
-                f"Von: {self.origin_yard_id} -> Nach: {self.dest_yard_id}, "
-                f"Dauer: {self.duration})")
+        return f"Physisch({self.origin_id}->{self.dest_id}, t={self.duration})"
 
-# --- 2. K-SHORTEST-PATH HILFSFUNKTION ---
-
-def _finde_top_k_pfade(start_node_id, end_node_id, k, graph, bahnhof_map):
+class LogischerBlock:
+    """ 
+    Repräsentiert einen potenziellen Block 'a' für das mathematische Modell.
+    Ein Block ist eine Sequenz von physischen Strecken ohne Zwischenklassifizierung (Bypass).
     """
-    Findet die 'k' kürzesten einfachen Pfade (ohne Zyklen).
-    Kostenmetrik (C_kq): Summe(t_a + w_a) für alle Strecken 'a' im Pfad.
+    def __init__(self, block_id, origin_yard_id, dest_yard_id, 
+                 total_duration, min_max_length, min_max_weight, physical_hops):
+        self.block_id = block_id
+        self.origin_yard_id = origin_yard_id
+        self.dest_yard_id = dest_yard_id
+        self.duration = total_duration      # t_a (Summe der Fahrzeiten im Block)
+        self.max_length = min_max_length    # Die restriktivste Länge auf dem Weg
+        self.max_weight = min_max_weight    # Das restriktivste Gewicht auf dem Weg
+        self.physical_hops = physical_hops  # Liste der durchfahrenen Knoten (zur Info)
+        
+    def __repr__(self):
+        # Zeigt z.B. "Block(Blk_5: Yard0->Yard3, t=15, via=[Yard0, Yard1, Yard2, Yard3])"
+        return (f"Block({self.block_id}: {self.origin_yard_id}->{self.dest_yard_id}, "
+                f"t={self.duration}, Hops={len(self.physical_hops)-1})")
+
+# 2. Algorithmen (Block-Generierung & Pfadsuche)
+
+def _generiere_kandidaten_bloecke(bahnhof_ids, physischer_graph, max_hops=3):
+    """
+    Erzeugt die Menge A (Kandidaten-Blöcke) basierend auf dem physischen Netz.
+    Nutzt Tiefensuche (DFS) mit Limitierung der Kantenanzahl (Hops).
+    """
+    kandidaten_bloecke = []
+    block_counter = 0
+    
+    print(f"   -> Generiere logistische Blöcke (Max Hops: {max_hops})...")
+
+    # Für jeden Bahnhof als möglichen Startpunkt eines Blocks
+    for start_node in bahnhof_ids:
+        
+        # DFS Stack speichert: 
+        # (aktueller_knoten, akkumulierte_dauer, min_laenge, min_gewicht, pfad_historie)
+        stack = [(start_node, 0, float('inf'), float('inf'), [start_node])]
+        
+        while stack:
+            curr_node, curr_dur, curr_len, curr_weight, history = stack.pop()
+            
+            # Ein Block ist valid, wenn wir mind. eine Kante zurückgelegt haben
+            if curr_node != start_node:
+                block_id = f"Blk_{block_counter}"
+                block_counter += 1
+                
+                neuer_block = LogischerBlock(
+                    block_id=block_id,
+                    origin_yard_id=start_node,
+                    dest_yard_id=curr_node,
+                    total_duration=curr_dur,
+                    min_max_length=curr_len,
+                    min_max_weight=curr_weight,
+                    physical_hops=history
+                )
+                kandidaten_bloecke.append(neuer_block)
+
+            # Abbruchbedingung: Wenn wir das Hop-Limit erreicht haben, nicht tiefer suchen
+            # history hat Länge (Hops + 1), da Startknoten enthalten ist.
+            if len(history) - 1 >= max_hops:
+                continue
+
+            # Nachbarn im physischen Graphen erkunden
+            if curr_node in physischer_graph:
+                for edge in physischer_graph[curr_node]:
+                    next_node = edge.dest_id
+                    
+                    # Zyklen vermeiden: Ein Block darf nicht im Kreis fahren
+                    if next_node not in history:
+                        new_dur = curr_dur + edge.duration
+                        # Kapazität ist das Minimum aller Teilsegment-Kapazitäten
+                        new_len = min(curr_len, edge.max_length)
+                        new_weight = min(curr_weight, edge.max_weight)
+                        new_history = history + [next_node]
+                        
+                        stack.append((next_node, new_dur, new_len, new_weight, new_history))
+                        
+    print(f"   -> {len(kandidaten_bloecke)} potenzielle Blöcke generiert.")
+    return kandidaten_bloecke
+
+def _finde_top_k_blocking_pfade(start_node_id, end_node_id, k, block_graph, bahnhof_map):
+    """
+    Findet k-kürzeste Pfade im BLOCK-Netzwerk (Q^k).
+    Kosten C_kq = Summe über alle Blöcke a im Pfad: (t_a + w_a)
+    wobei w_a die Rangierzeit am Startbahnhof des jeweiligen Blocks ist.
     """
     tie_breaker = 0
+    # Heap speichert: (Gesamtkosten, tie_breaker, [Liste von Block-Objekten])
     pq = [(0, tie_breaker, [])]
     gefundene_pfade = []
 
     while pq and len(gefundene_pfade) < k:
-        (kosten, _, pfad) = heapq.heappop(pq)
-        aktueller_knoten_id = start_node_id if not pfad else pfad[-1].dest_yard_id
+        (kosten, _, pfad_bloecke) = heapq.heappop(pq)
+        
+        # Aktueller Ort ist das Ende des letzten Blocks (oder start_node beim Start)
+        aktueller_knoten = start_node_id if not pfad_bloecke else pfad_bloecke[-1].dest_yard_id
             
-        if aktueller_knoten_id == end_node_id:
-            gefundene_pfade.append((kosten, pfad))
+        if aktueller_knoten == end_node_id:
+            gefundene_pfade.append(pfad_bloecke)
             continue 
 
         besuchte_knoten = {start_node_id}
-        for strecke in pfad:
-            besuchte_knoten.add(strecke.dest_yard_id)
+        for b in pfad_bloecke:
+            besuchte_knoten.add(b.dest_yard_id)
 
-        for strecke in graph[aktueller_knoten_id]:
-            naechster_knoten_id = strecke.dest_yard_id
-            
-            if naechster_knoten_id not in besuchte_knoten:
-                # Kostenberechnung (Fahrzeit + Rangierzeit am ZIEL der Strecke)
-                neue_kosten = kosten + strecke.duration + bahnhof_map[strecke.dest_yard_id].rangier_dauer
-                neuer_pfad = pfad + [strecke]
-                tie_breaker += 1
-                heapq.heappush(pq, (neue_kosten, tie_breaker, neuer_pfad))
+        # Wir suchen nun den nächsten logistischen Block, der hier startet
+        if aktueller_knoten in block_graph:
+            for block in block_graph[aktueller_knoten]:
+                naechster_knoten = block.dest_yard_id
                 
-    return [pfad for kosten, pfad in gefundene_pfade]
+                if naechster_knoten not in besuchte_knoten:
+                    # KOSTENBERECHNUNG LAUT PAPER:
+                    # Jeder genutzte Block 'a' kostet: TravelTime(a) + ClassificationTime(StartNode(a))
+                    
+                    rangier_zeit_am_start = bahnhof_map[aktueller_knoten].rangier_dauer
+                    step_cost = block.duration + rangier_zeit_am_start
+                    
+                    neue_kosten = kosten + step_cost
+                    neuer_pfad = pfad_bloecke + [block]
+                    
+                    tie_breaker += 1
+                    heapq.heappush(pq, (neue_kosten, tie_breaker, neuer_pfad))
+                
+    return gefundene_pfade
 
-# --- 3. HAUPTFUNKTION ZUR DATENVERARBEITUNG ---
+# 3. Hauptfunktion zum Laden und Verarbeiten der Daten
 
-def lade_daten(json_dateipfad, anzahl_pfade=3):
+def lade_daten(json_dateipfad, anzahl_pfade=3, max_block_hops=3):
     """
-    Lädt die JSON-Datei, verarbeitet sie und gibt alle notwendigen
-    Parameter und Objektlisten für das Optimierungsmodell zurück.
+    Lädt JSON, generiert logistische Blöcke (bis max_block_hops) und berechnet Parameter.
     
-    :param json_dateipfad: Pfad zur JSON-Datei.
-    :param anzahl_pfade: Die Anzahl der (kürzesten) Pfade, die pro Auftrag 
-                         generiert werden sollen (Standard: 3).
-    :return: Ein Dictionary, das alle Listen und Parameter-Dictionaries enthält.
+    :param max_block_hops: Maximale Anzahl physischer Segmente in einem Block (Standard: 3).
     """
+    print(f"Starte Datenverarbeitung aus '{json_dateipfad}'")
     
-    print(f"--- Starte Datenverarbeitung aus '{json_dateipfad}' ---")
-    
-    # --- A. Initialisierung der Speicherobjekte ---
+    # Initialisierung
     auftrags_liste = []
     bahnhof_liste = []
-    strecken_liste = []
-    bahnhof_map = {}
     
-    # Rückgabe-Dictionaries
+    # Rückgabe-Container
     Qk = {}
-    Pfad_Definitionen = {}
-    delta_kqa = {}
+    Pfad_Definitionen = {} # Mapping PfadID -> Liste von Blöcken
+    
+    d_k = {}
+    T_k = {}
+    V_i = {}
+    N_i = {}
+    
     C_kq = {}
-    xi_ia = {}
+    delta_kqa = {}
+    
     t_a = {}
     w_a = {}
     chi_a = {}
     u_a = {}
-    V_i = {}
-    N_i = {}
-    d_k = {}
-    T_k = {}
-    S = [] # Bahnhof-IDs
-    A = [] # Strecken-IDs
-    K = [] # Auftrags-IDs
+    xi_ia = {}
 
     try:
-        # --- B. DATENEXTRAKTION (Aufträge, Bahnhöfe, Strecken) ---
-        print("Schritt 1: Lade und extrahiere JSON-Rohdaten...")
-        
+        # 1. JSON Laden
         with open(json_dateipfad, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
@@ -139,177 +214,165 @@ def lade_daten(json_dateipfad, anzahl_pfade=3):
                 latest_arrival_time=order_json['MaxTimeUntilArrival']['Value']
             ))
 
-        # Bahnhöfe
-        einzigartige_bahnhofe = {} 
+        # Bahnhöfe (Filtern der Unique IDs aus den Zeit-Knoten)
+        unique_yards = {}
         for node in data['Network']['Nodes']['YardNodes']:
-            yard_data = node['ShuntingYard']
-            yard_id = yard_data['YardId']['Value']
-            if yard_id not in einzigartige_bahnhofe:
-                neuer_bahnhof = Rangierbahnhof(
-                    yard_id=yard_id,
-                    rangier_dauer=yard_data['ShuntingDuration']['Value'],
-                    kapazitaet=yard_data['FreightCarCapacity']['Value'],
-                    kosten_pro_wagen=yard_data['ShuntingCostPerCar']['Cost']['Value']
+            yd = node['ShuntingYard']
+            y_id = yd['YardId']['Value']
+            if y_id not in unique_yards:
+                unique_yards[y_id] = Rangierbahnhof(
+                    yard_id=y_id,
+                    rangier_dauer=yd['ShuntingDuration']['Value'],
+                    kapazitaet=yd['FreightCarCapacity']['Value'],
+                    kosten_pro_wagen=yd['ShuntingCostPerCar']['Cost']['Value'],
+                    dispatch_kapazität=yd['TrainDispatchCapacity']['Value']
                 )
-                einzigartige_bahnhofe[yard_id] = neuer_bahnhof
-        bahnhof_liste = list(einzigartige_bahnhofe.values())
-        bahnhof_liste.sort(key=lambda bhf: int(bhf.yard_id.replace("ShuntingYard", "")))
-        bahnhof_map = {bhf.yard_id: bhf for bhf in bahnhof_liste}
-
-        # Strecken (BlockingPfade)
-        i = 0
-        gesehene_verbindungen = set()
-        for arc_json in data['Network']['Arcs']['DrivingArcs']:
-            origin_id = arc_json['YardFrom']['ShuntingYard']['YardId']['Value']
-            dest_id = arc_json['YardTo']['ShuntingYard']['YardId']['Value']
-            verbindung_tupel = (origin_id, dest_id)
-            if verbindung_tupel not in gesehene_verbindungen:
-                arc_id = "B"+str(i)
-                neue_strecke = BlockingPfad(
-                    origin_yard_id=origin_id,
-                    dest_yard_id=dest_id,
-                    duration=arc_json['Duration']['Value'],
-                    max_length=arc_json['MaximalTrainLength']['Value'],
-                    max_weight=arc_json['MaximalTrainWeight']['Value'],
-                    blocking_arc_id=arc_id,
-                )
-                i += 1
-                strecken_liste.append(neue_strecke)
-                gesehene_verbindungen.add(verbindung_tupel)
+        bahnhof_liste = list(unique_yards.values())
         
-        print(f"Datenextraktion abgeschlossen: {len(auftrags_liste)} Aufträge, "
-              f"{len(bahnhof_liste)} Bahnhöfe, {len(strecken_liste)} Strecken.")
-
-        # --- C. GRAPH-ERSTELLUNG & PFADSUCHE (Qk, C_kq, delta_kqa) ---
-        print(f"\nSchritt 2: Erstelle Graph und suche Top {anzahl_pfade} Pfade pro Auftrag...")
-        
-        graph = defaultdict(list)
-        for strecke in strecken_liste:
-            graph[strecke.origin_yard_id].append(strecke)
+        # Sortieren für konsistente Ergebnisse 
+        try:
+            bahnhof_liste.sort(key=lambda x: int(''.join(filter(str.isdigit, x.yard_id))))
+        except:
+            bahnhof_liste.sort(key=lambda x: x.yard_id)
             
-        # Temporäre Maps für Kostenberechnung
-        _t_a = {s.blocking_arc_id: s.duration for s in strecken_liste}
-        _w_a_ziel = {s.blocking_arc_id: bahnhof_map[s.dest_yard_id].rangier_dauer 
-                   for s in strecken_liste}
+        bahnhof_map = {b.yard_id: b for b in bahnhof_liste}
+        bahnhof_ids = list(bahnhof_map.keys())
 
-        pfad_zaehler = 1
+        # Physische Strecken (DrivingArcs) in Adjazenzliste laden
+        phys_graph_adj = defaultdict(list)
+        seen_arcs = set()
+        
+        for arc in data['Network']['Arcs']['DrivingArcs']:
+            o_id = arc['YardFrom']['ShuntingYard']['YardId']['Value']
+            d_id = arc['YardTo']['ShuntingYard']['YardId']['Value']
+            
+            # Duplikate vermeiden 
+            if (o_id, d_id) in seen_arcs: continue
+            seen_arcs.add((o_id, d_id))
+            
+            strecke = PhysischeStrecke(
+                origin_id=o_id,
+                dest_id=d_id,
+                duration=arc['Duration']['Value'],
+                max_length=arc['MaximalTrainLength']['Value'],
+                max_weight=arc['MaximalTrainWeight']['Value']
+            )
+            phys_graph_adj[o_id].append(strecke)
+
+        print(f"Basisdaten: {len(auftrags_liste)} Aufträge, {len(bahnhof_liste)} Bahnhöfe, {len(seen_arcs)} physische Verbindungen.")
+
+        # 2. Kandidaten-Blöcke generieren
+        # Generiert Blöcke, die bis zu 'max_block_hops' Kanten lang sind.
+        block_objekte = _generiere_kandidaten_bloecke(bahnhof_ids, phys_graph_adj, max_hops=max_block_hops)
+        
+        # Block-Graph bauen (für die Pfadsuche)
+        block_graph_adj = defaultdict(list)
+        for blk in block_objekte:
+            block_graph_adj[blk.origin_yard_id].append(blk)
+            
+            # Parameter für Block 'a' füllen
+            a_id = blk.block_id
+            t_a[a_id] = blk.duration
+            # w_a ist die Rangierzeit am START-Bahnhof dieses Blocks
+            w_a[a_id] = bahnhof_map[blk.origin_yard_id].rangier_dauer
+            
+            # Kosten: Hier vereinfacht. Im Paper oft "Operating Cost per train".
+            # Annahme: Je länger der Block, desto teurer der Zugbetrieb.
+            chi_a[a_id] = 1000  + (100 * blk.duration) 
+            
+            # Kapazität: Standardwert 50 Wagen (oder abgeleitet aus Gewicht)
+            u_a[a_id] = 25 
+            
+            # xi_ia: Ist Bahnhof i der Startbahnhof von Block a?
+            for i_id in bahnhof_ids:
+                xi_ia[(i_id, a_id)] = 1 if i_id == blk.origin_yard_id else 0
+
+        A_ids = [b.block_id for b in block_objekte]
+        print(f"Block-Graph erstellt: {len(A_ids)} logistische Blöcke (Kanten).")
+
+        # --- 3. PFADSUCHE (Q) ---
+        print(f"Suche Top-{anzahl_pfade} Blocking-Pfade pro Auftrag...")
+        
+        path_counter = 0
         for k in auftrags_liste:
             k_id = k.order_id
             
-            gefundene_pfade_obj = _finde_top_k_pfade(k.origin, k.destination, anzahl_pfade, graph, bahnhof_map)
+            # Pfadsuche im Block-Graphen
+            paths_found = _finde_top_k_blocking_pfade(
+                k.origin, k.destination, anzahl_pfade, block_graph_adj, bahnhof_map
+            )
             
-            kandidaten_pfad_ids = []
-            if not gefundene_pfade_obj:
-                print(f"WARNUNG: Für Auftrag {k_id} (Von {k.origin} nach {k.destination}) wurde kein Pfad gefunden.")
+            path_ids_for_k = []
             
-            for pfad_obj_liste in gefundene_pfade_obj:
-                q_id = f"P{pfad_zaehler}"
-                pfad_zaehler += 1
+            if not paths_found:
+                print(f"WARNUNG: Kein Pfad für {k_id} ({k.origin}->{k.destination}) gefunden!")
+                continue
+
+            for p_blocks in paths_found:
+                q_id = f"P{path_counter}"
+                path_counter += 1
+                path_ids_for_k.append(q_id)
                 
-                kandidaten_pfad_ids.append(q_id)
-                Pfad_Definitionen[q_id] = pfad_obj_liste
+                # Speichere die Block-Sequenz für spätere Analysen
+                Pfad_Definitionen[q_id] = p_blocks
                 
-                current_kq_cost = 0
-                strecken_ids_in_pfad_q = set()
+                # Kosten C_kq berechnen
+                cost_val = 0
+                block_ids_in_path = set()
+                for blk in p_blocks:
+                    # Kosten = Block-Fahrzeit + Rangierzeit am Start des Blocks
+                    cost_val += t_a[blk.block_id] + w_a[blk.block_id]
+                    block_ids_in_path.add(blk.block_id)
                 
-                for strecke in pfad_obj_liste:
-                    a_id = strecke.blocking_arc_id
-                    strecken_ids_in_pfad_q.add(a_id)
-                    current_kq_cost += _t_a[a_id] + _w_a_ziel[a_id] # Kosten = t_a + w_a(ziel)
-
-                C_kq[(k_id, q_id)] = current_kq_cost
+                C_kq[(k_id, q_id)] = cost_val
                 
-                for a in strecken_liste:
-                    a_id = a.blocking_arc_id
-                    delta_kqa[(k_id, q_id, a_id)] = 1 if a_id in strecken_ids_in_pfad_q else 0
-                        
-            Qk[k_id] = kandidaten_pfad_ids
+                # Delta Parameter: Welche Blöcke 'a' sind im Pfad 'q' enthalten?
+                for a_x in A_ids:
+                    delta_kqa[(k_id, q_id, a_x)] = 1 if a_x in block_ids_in_path else 0
+            
+            Qk[k_id] = path_ids_for_k
+            
+            # Weitere Parameter
+            d_k[k_id] = k.anzahl_waggons
+            T_k[k_id] = k.latest_arrival_time
+
+        # Stations-Parameter
+        for bhf in bahnhof_liste:
+            V_i[bhf.yard_id] = bhf.kapazitaet
+            N_i[bhf.yard_id] = bhf.dispatch_kapazität
+
+        # 4. Rückgabe
+        print("Datenverarbeitung abgeschlossen.")
         
-        print(f"Pfadsuche abgeschlossen. {len(Pfad_Definitionen)} einzigartige Pfade gefunden.")
-
-        # --- D. PARAMETER-DICTIONARIES ERSTELLEN ---
-        print("\nSchritt 3: Erstelle finale Parameter-Dictionaries...")
-        
-        # Sets S, A, K
-        S = [bhf.yard_id for bhf in bahnhof_liste]
-        A = [s.blocking_arc_id for s in strecken_liste]
-        K = [a.order_id for a in auftrags_liste]
-
-        # xi_ia Matrix (Bahnhof-Start-Strecke)
-        for bahnhof in bahnhof_liste:
-            i_id = bahnhof.yard_id
-            for strecke in strecken_liste:
-                a_id = strecke.blocking_arc_id
-                xi_ia[(i_id, a_id)] = 1 if bahnhof.yard_id == strecke.origin_yard_id else 0
-
-        # Block-Parameter (a)
-        for strecke in strecken_liste:
-            a_id = strecke.blocking_arc_id
-            t_a[a_id] = strecke.duration 
-            w_a[a_id] = bahnhof_map[strecke.origin_yard_id].rangier_dauer # w_a = Rangierzeit am START
-            chi_a[a_id] = 1000 # Placeholder
-            u_a[a_id] = 25 # Placeholder
-
-        # Stations-Parameter (i)
-        for bahnhof in bahnhof_liste:
-            i_id = bahnhof.yard_id
-            V_i[i_id] = bahnhof.kapazitaet
-            N_i[i_id] = 20 # Placeholder
-
-        # Sendungs-Parameter (k)
-        for auftrag in auftrags_liste:
-            k_id = auftrag.order_id
-            d_k[k_id] = auftrag.anzahl_waggons
-            T_k[k_id] = auftrag.latest_arrival_time
-
-        print("Parameter-Erstellung abgeschlossen.")
-
-# --- E. RÜCKGABE ---
-        
-        print(f"\n--- Datenverarbeitung erfolgreich abgeschlossen ---")
-        
-        # Alle erstellten Objekte in einem SimpleNamespace-Objekt zurückgeben
         return SimpleNamespace(
-            # --- Mengen (Listen von IDs) ---
-            S = S, # Bahnhöfe
-            A = A, # Strecken (Blöcke)
-            K = K, # Aufträge (Sendungen)
+            S = bahnhof_ids,
+            A = A_ids,
+            K = list(d_k.keys()),
             
-            # --- Objektlisten (falls benötigt) ---
-            obj_auftraege = auftrags_liste,
-            obj_bahnhofe = bahnhof_liste,
-            obj_strecken = strecken_liste,
-            obj_pfade = Pfad_Definitionen,
+            Qk = Qk,
+            d_k = d_k,
+            T_k = T_k,
             
-            # --- Parameter für Aufträge (k) ---
-            Qk = Qk,       # Dict: k -> [q1, q2, ...]
-            d_k = d_k,     # Dict: k -> anzahl_waggons
-            T_k = T_k,     # Dict: k -> max_zeit
+            C_kq = C_kq,
             
-            # --- Parameter für Pfade (k, q) ---
-            C_kq = C_kq,   # Dict: (k, q) -> gesamtkosten (t_a + w_a(ziel))
+            t_a = t_a,
+            w_a = w_a,
+            chi_a = chi_a,
+            u_a = u_a,
             
-            # --- Parameter für Strecken (a) ---
-            t_a = t_a,     # Dict: a -> fahrzeit
-            w_a = w_a,     # Dict: a -> rangierzeit (am START)
-            chi_a = chi_a, # Dict: a -> platzhalter-kosten (1000)
-            u_a = u_a,     # Dict: a -> platzhalter-kapazität (25)
+            V_i = V_i,
+            N_i = N_i,
             
-            # --- Parameter für Bahnhöfe (i) ---
-            V_i = V_i,     # Dict: i -> kapazität
-            N_i = N_i,     # Dict: i -> platzhalter-max-züge (20)
+            delta_kqa = delta_kqa,
+            xi_ia = xi_ia,
             
-            # --- Matrizen (als Dictionaries) ---
-            delta_kqa = delta_kqa, # Dict: (k, q, a) -> 0 oder 1
-            xi_ia = xi_ia          # Dict: (i, a) -> 0 oder 1
+            # Zusatzinfos für Auswertung
+            obj_bloecke = {b.block_id: b for b in block_objekte},
+            obj_pfade = Pfad_Definitionen
         )
 
-    except FileNotFoundError:
-        print(f"FEHLER: Die Datei '{json_dateipfad}' wurde nicht gefunden.")
-        return None
-    except KeyError as e:
-        print(f"FEHLER: Unerwartete JSON-Struktur. Fehlender Schlüssel: {e}")
-        return None
     except Exception as e:
-        print(f"Ein unerwarteter Fehler ist aufgetreten: {e}")
+        print(f"SCHWERER FEHLER beim Laden: {e}")
+        import traceback
+        traceback.print_exc()
         return None
