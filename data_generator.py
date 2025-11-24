@@ -4,8 +4,8 @@ import heapq
 import math
 
 # Konfigurtion
-QUELLE_DATEI = 'RandomizedInstances/24Horizon-1Discretization-40Orders.json' # Ihre Basis-Datei
-SCENARIO_SIZE = 2000  # <-- HIER ÄNDERN: Anzahl der Aufträge
+QUELLE_DATEI = 'RandomizedInstances/24Horizon-1Discretization-40Orders.json' # Basis-Datei
+SCENARIO_SIZE = 5000  # <-- Anzahl der Aufträge
 AUSGABE_DATEI = f'Instance_{SCENARIO_SIZE}.json'
 
 # PH = 1 Woche
@@ -143,7 +143,7 @@ def main():
             d = random.choice(yard_ids)
             
         # Zufällige Wagenanzahl (einheitlicher Bereich für alle)
-        # zwischen 1 und 20 Wagen
+        # zwischen 1 und 15 Wagen
         cars = random.randint(1, 15)
 
         # Bestimme Mindestfahrzeit (Dijkstra) für Deadline
